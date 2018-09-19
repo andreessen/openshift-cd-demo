@@ -199,5 +199,5 @@ To check functionality one could switch router back and forth between blue and g
   oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-blue"}}}'
 
   # Switch to green
-  oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-blue"}}}'
+  oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-green"}}}'
   ``` 
