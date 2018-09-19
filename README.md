@@ -12,6 +12,7 @@ This repository includes the infrastructure and pipeline definition for continuo
 * [Troubleshooting](#troubleshooting)
 * [Demo Guide](#demo-guide)
 * [Using Eclipse Che for Editing Code](#using-eclipse-che-for-editing-code)
+* [Additional Features](#additional-features)
 
 
 ## Introduction
@@ -188,3 +189,7 @@ Click on **Git > Commit** to commit the changes to the `openshift-tasks` git rep
 
 As soon the changes are committed to the git repository, a new instances of pipeline gets triggers to test and deploy the 
 code changes.
+
+## Additional Features
+
+Blue/Green conception is implemented in this demo. While Deploy To Stage phase pipeline checks if an instance of application exists - if true then new instance is being deployed in parallel to first one. Router is switched towards newly deployed application and old version still works to hot backup.
