@@ -75,220 +75,235 @@ objects:
         jenkinsfile: |-
           def version, mvnCmd = "mvn -s configuration/cicd-settings-nexus3.xml"
 
-        pipeline {
-          agent {
-            label 'maven'
-          }
-          stages {
-            stage('Build App') {
-              steps {
-                git branch: 'eap-7', url: 'http://gogs:3000/gogs/openshift-tasks.git'
-                script {
-                    def pom = readMavenPom file: 'pom.xml'
-                    version = pom.version
-                }
-                sh "${mvnCmd} install -DskipTests=true"
-              }
+          pipeline {
+            agent {
+              label 'maven'
             }
-            stage('Test') {
-              steps {
-                sh "${mvnCmd} test"
-                step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
-              }
-            }
-            stage('Code Analysis') {
-              steps {
-                script {
-                  sh "${mvnCmd} sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -DskipTests=true"
+            stages {
+              stage('Build App') {
+                steps {
+                  git branch: 'eap-7', url: 'http://gogs:3000/gogs/openshift-tasks.git'
+                  script {
+                      def pom = readMavenPom file: 'pom.xml'
+                      version = pom.version
+                  }
+                  sh "${mvnCmd} install -DskipTests=true"
                 }
               }
-            }
-            stage('Archive App') {
-              steps {
-                sh "${mvnCmd} deploy -DskipTests=true -P nexus3"
+              stage('Test') {
+                steps {
+                  sh "${mvnCmd} test"
+                  step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
+                }
               }
-            }
-            stage('Create Image Builder') {
-              when {
-                expression {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      return !openshift.selector("bc", "tasks").exists();
-                    }
+              stage('Code Analysis') {
+                steps {
+                  script {
+                    sh "${mvnCmd} sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -DskipTests=true"
                   }
                 }
               }
-              steps {
-                script {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      openshift.newBuild("--name=tasks", "--image-stream=wildfly:latest", "--binary=true")
-                    }
-                  }
+              stage('Archive App') {
+                steps {
+                  sh "${mvnCmd} deploy -DskipTests=true -P nexus3"
                 }
               }
-            }
-            stage('Build Image') {
-              steps {
-                sh "rm -rf oc-build && mkdir -p oc-build/deployments"
-                sh "cp target/openshift-tasks.war oc-build/deployments/ROOT.war"
-                
-                script {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      openshift.selector("bc", "tasks").startBuild("--from-dir=oc-build", "--wait=true")
-                    }
-                  }
-                }
-              }
-            }
-            stage('Create DEV') {
-              when {
-                expression {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      return !openshift.selector('dc', 'tasks').exists()
-                    }
-                  }
-                }
-              }
-              steps {
-                script {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      def app = openshift.newApp("tasks:latest")
-                      app.narrow("svc").expose();
-
-                      openshift.set("probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                      openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-
-                      def dc = openshift.selector("dc", "tasks")
-                      while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
-                          sleep 10
+              stage('Create Image Builder') {
+                when {
+                  expression {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        return !openshift.selector("bc", "tasks").exists();
                       }
-                      openshift.set("triggers", "dc/tasks", "--manual")
+                    }
+                  }
+                }
+                steps {
+                  script {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        openshift.newBuild("--name=tasks", "--image-stream=wildfly:latest", "--binary=true")
+                      }
                     }
                   }
                 }
               }
-            }
-            stage('Deploy DEV') {
-              steps {
-                script {
-                  openshift.withCluster() {
-                    openshift.withProject(env.DEV_PROJECT) {
-                      openshift.selector("dc", "tasks").rollout().latest();
+              stage('Build Image') {
+                steps {
+                  sh "rm -rf oc-build && mkdir -p oc-build/deployments"
+                  sh "cp target/openshift-tasks.war oc-build/deployments/ROOT.war"
+                  
+                  script {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        openshift.selector("bc", "tasks").startBuild("--from-dir=oc-build", "--wait=true")
+                      }
                     }
                   }
                 }
               }
-            }
-            stage('Promote to STAGE?') {
-              steps {
-                timeout(time:15, unit:'MINUTES') {
-                    input message: "Promote to STAGE?", ok: "Promote"
+              stage('Create DEV') {
+                when {
+                  expression {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        return !openshift.selector('dc', 'tasks').exists()
+                      }
+                    }
+                  }
                 }
+                steps {
+                  script {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        def app = openshift.newApp("tasks:latest")
+                        app.narrow("svc").expose();
 
-                
-              }
-            }
-            stage('Deploy STAGE') {
-              steps {
-                script {
-                  newState = "blue"
-                  currentState = "green"
-                  
-                  
-                  openshift.withCluster() {
-                    openshift.withProject(env.STAGE_PROJECT) {
-                        if (!openshift.selector('dc', 'tasks-green').exists()) {
-                            println("Begin")
-                            openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
-                            openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}").narrow("svc").expose()
-                            openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                            openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                        } else {
-                            
-                            if (!openshift.selector('dc', 'tasks-blue').exists()) {
-                                println("New Blue")
-                                openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
-                                openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
-                                openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                                println("6")
-                                def route = openshift.selector('route', 'tasks-green').object()
-                                openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-blue\"}}}'")
-                                println("7")
-                            } else {
-                                println("Both")
-                                
-                                def newState = 'green'
-                                def currentState = 'blue'
-                                
-                                sh "oc get route tasks-green -n ${env.STAGE_PROJECT} -o jsonpath='{ .spec.to.name }' --loglevel=4 > current_route"
-                                current_route = readFile('current_route').trim()
-                                println("Current active route: " + current_route)
-                                  
-                                sh "oc get dc ${current_route} -n ${env.STAGE_PROJECT} -o jsonpath='{ .spec.triggers[1].imageChangeParams.from.name }' --loglevel=4 > current_version"
-                                current_version = readFile('current_version').trim()
-                                println("Current active version: " + current_version)
-                                if (current_route == "tasks-blue") {
-                                    newState = "green"
-                                    currentState = "blue"
-                                }
-                                if (current_route == "tasks-green") {
-                                    newState = "blue"
-                                    currentState = "green"
-                                }
-                                println("New state: " + newState)
-                                println("Current state: " + currentState)
-                                println("4")
-                                if (newState == 'green') {
-                                    println("4-1")
-                                    openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
-                                    openshift.selector('dc', 'tasks-green').delete()
-                                    openshift.selector('svc', 'tasks-green').delete()
-                                    println("4-1-1")
-                                    openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}")
-                                    openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                    openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                                }
-                                if (newState == 'blue') {
-                                    println("4-2")
-                                    openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
-                                    openshift.selector('dc', 'tasks-blue').delete()
-                                    openshift.selector('svc', 'tasks-blue').delete()
-                                    println("4-2-1")
-                                    openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
-                                    openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                    openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                                }
-                                println("5")
-                                
-                                if (currentState == 'green') {
-                                    println("6-1")
-                                    openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-blue\"}}}'")
-                                }
-                                if (currentState == 'blue') {
-                                    println("6-2")
-                                    openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-green\"}}}'")
-                                }
-                                
-                                println("7")
-                            } 
-                        }    
+                        openshift.set("probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
+                        openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+
+                        def dc = openshift.selector("dc", "tasks")
+                        while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                            sleep 10
+                        }
+                        openshift.set("triggers", "dc/tasks", "--manual")
+                      }
                     }
-                  }    
+                  }
+                }
+              }
+              stage('Deploy DEV') {
+                steps {
+                  script {
+                    openshift.withCluster() {
+                      openshift.withProject(env.DEV_PROJECT) {
+                        openshift.selector("dc", "tasks").rollout().latest();
+                      }
+                    }
+                  }
+                }
+              }
+              stage('Promote to STAGE?') {
+                steps {
+                  timeout(time:15, unit:'MINUTES') {
+                      input message: "Promote to STAGE?", ok: "Promote"
+                  }
+
                   
-                  
-                  
-                  
-                  
+                }
+              }
+              stage('Deploy STAGE') {
+                steps {
+                  script {
+                    newState = "blue"
+                    currentState = "green"
+                    
+                    
+                    openshift.withCluster() {
+                      openshift.withProject(env.STAGE_PROJECT) {
+                          if (!openshift.selector('dc', 'tasks-green').exists()) {
+                              println("Begin")
+                              openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
+                              openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}").narrow("svc").expose()
+                              openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
+                              openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                          } else {
+                              
+                              if (!openshift.selector('dc', 'tasks-blue').exists()) {
+                                  println("New Blue")
+                                  openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
+                                  openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
+                                  openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
+                                  openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                                  println("6")
+                                  def dc = openshift.selector("dc", "tasks-blue")
+                                  while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                                      sleep 10
+                                  }
+                                  def route = openshift.selector('route', 'tasks-green').object()
+                                  openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-blue\"}}}'")
+                                  println("7")
+                              } else {
+                                  println("Both")
+                                  
+                                  def newState = 'green'
+                                  def currentState = 'blue'
+                                  
+                                  sh "oc get route tasks-green -n ${env.STAGE_PROJECT} -o jsonpath='{ .spec.to.name }' --loglevel=4 > current_route"
+                                  current_route = readFile('current_route').trim()
+                                  println("Current active route: " + current_route)
+                                    
+                                  sh "oc get dc ${current_route} -n ${env.STAGE_PROJECT} -o jsonpath='{ .spec.triggers[1].imageChangeParams.from.name }' --loglevel=4 > current_version"
+                                  current_version = readFile('current_version').trim()
+                                  println("Current active version: " + current_version)
+                                  if (current_route == "tasks-blue") {
+                                      newState = "green"
+                                      currentState = "blue"
+                                  }
+                                  if (current_route == "tasks-green") {
+                                      newState = "blue"
+                                      currentState = "green"
+                                  }
+                                  println("New state: " + newState)
+                                  println("Current state: " + currentState)
+                                  println("4")
+                                  if (newState == 'green') {
+                                      println("4-1")
+                                      openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
+                                      openshift.selector('dc', 'tasks-green').delete()
+                                      openshift.selector('svc', 'tasks-green').delete()
+                                      println("4-1-1")
+                                      openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}")
+                                      openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
+                                      openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                                      
+                                      def dc = openshift.selector("dc", "tasks-green")
+                                      while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                                          sleep 10
+                                      }
+                                      
+                                  }
+                                  if (newState == 'blue') {
+                                      println("4-2")
+                                      openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
+                                      openshift.selector('dc', 'tasks-blue').delete()
+                                      openshift.selector('svc', 'tasks-blue').delete()
+                                      println("4-2-1")
+                                      openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
+                                      openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
+                                      openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                                  
+                                      def dc = openshift.selector("dc", "tasks-blue")
+                                      while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                                          sleep 10
+                                      }
+                                  }
+                                  println("5")
+                                  
+                                  if (currentState == 'green') {
+                                      println("6-1")
+                                      openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-blue\"}}}'")
+                                  }
+                                  if (currentState == 'blue') {
+                                      println("6-2")
+                                      openshift.patch('route/tasks-green', "'{\"spec\":{\"to\":{\"name\":\"tasks-green\"}}}'")
+                                  }
+                                  
+                                  println("7")
+                              } 
+                          }    
+                      }
+                    }    
+                    
+                    
+                    
+                    
+                    
+                  }
                 }
               }
             }
           }
-        }
       type: JenkinsPipeline
 - apiVersion: v1
   kind: ConfigMap

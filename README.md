@@ -193,3 +193,11 @@ code changes.
 ## Additional Features
 
 Blue/Green conception is implemented in this demo. While Deploy To Stage phase pipeline checks if an instance of application exists - if true then new instance is being deployed in parallel to first one. Router is switched towards newly deployed application and old version still works to hot backup.
+To check functionality one could switch router back and forth between blue and green versions:
+  ```shell
+  # Switch to blue
+  oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-blue"}}}'
+
+  # Switch to green
+  oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-blue"}}}'
+  ``` 
