@@ -98,10 +98,26 @@ objects:
               }
               stage('Code Analysis') {
                 steps {
-                  script {
-                    sh "${mvnCmd} sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -DskipTests=true"
-                  }
+
+                      withSonarQubeEnv('Sonar') {
+                          sh "${mvnCmd} sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -DskipTests=true"
+                      }    
+                    
+                  
                 }
+              }
+              stage("Quality Gate") {
+                  steps {
+                      timeout(time: 1, unit: 'HOURS') { // Just in case something goes wrong, pipeline will be killed after a timeout
+                      script {
+                          def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
+                          println("QG: ${qg.status}")
+                          if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                          }
+                      }
+                    }
+                  }
               }
               stage('Archive App') {
                 steps {

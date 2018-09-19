@@ -192,7 +192,7 @@ code changes.
 
 ## Additional Features
 
-Blue/Green conception is implemented in this demo. While Deploy To Stage phase pipeline checks if an instance of application exists - if true then new instance is being deployed in parallel to first one. Router is switched towards newly deployed application and old version still works to hot backup.
+* Blue/Green deployment conception is implemented in this demo. While Deploy To Stage phase pipeline checks if an instance of application exists - if true then new instance is being deployed in parallel to first one. Router is switched towards newly deployed application and old version still works to hot backup.
 To check functionality one could switch router back and forth between blue and green versions:
   ```shell
   # Switch to blue
@@ -201,3 +201,10 @@ To check functionality one could switch router back and forth between blue and g
   # Switch to green
   oc patch route/tasks-green -p '{"spec":{"to":{"name":"tasks-green"}}}'
   ``` 
+* Preventing pipeline propagation if SonarQube analysis fails. To do it use [https://blog.sonarsource.com/breaking-the-sonarqube-analysis-with-jenkins-pipelines/](https://blog.sonarsource.com/breaking-the-sonarqube-analysis-with-jenkins-pipelines/)
+Install plugin in Jenkins:
+![](images/jenkins-sq-scanner.png?raw=true)
+Configure plugin in Jenkins:
+![](images/jenkins-sq-config.png?raw=true)
+Add webhook in SonarQube:
+![](images/sq-jenkins-webhook.png?raw=true)
