@@ -225,7 +225,7 @@ objects:
                           if (!openshift.selector('dc', 'tasks-green').exists()) {
                               println("Begin")
                               openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
-                              openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}").narrow("svc").expose()
+                              openshift.newApp("--name=tasks-green --image-stream=${env.STAGE_PROJECT}/tasks-green:${version}").narrow("svc").expose()
                               openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
                               openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
                           } else {
@@ -233,7 +233,7 @@ objects:
                               if (!openshift.selector('dc', 'tasks-blue').exists()) {
                                   println("New Blue")
                                   openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
-                                  openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
+                                  openshift.newApp("--name=tasks-blue --image-stream=${env.STAGE_PROJECT}/tasks-blue:${version}")
                                   openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
                                   openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
                                   println("6")
@@ -274,7 +274,7 @@ objects:
                                       openshift.selector('dc', 'tasks-green').delete()
                                       openshift.selector('svc', 'tasks-green').delete()
                                       println("4-1-1")
-                                      openshift.newApp("--name=tasks-green --image-stream=stage/tasks-green:${version}")
+                                      openshift.newApp("--name=tasks-green --image-stream=${env.STAGE_PROJECT}/tasks-green:${version}")
                                       openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
                                       openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
                                       
@@ -290,7 +290,7 @@ objects:
                                       openshift.selector('dc', 'tasks-blue').delete()
                                       openshift.selector('svc', 'tasks-blue').delete()
                                       println("4-2-1")
-                                      openshift.newApp("--name=tasks-blue --image-stream=stage/tasks-blue:${version}")
+                                      openshift.newApp("--name=tasks-blue --image-stream=${env.STAGE_PROJECT}/tasks-blue:${version}")
                                       openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
                                       openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
                                   
