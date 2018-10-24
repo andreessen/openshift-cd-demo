@@ -199,6 +199,13 @@ objects:
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
                         openshift.selector("dc", "tasks").rollout().latest();
+                        def dc = openshift.selector("dc", "tasks");
+                        def dcObj = dc.object();
+                        def podSelector = openshift.selector('pod', [deployment: "tasks-${dcObj.status.latestVersion}"])
+                        podSelector.untilEach {
+                            echo "pod: ${it.name()}"
+                            return it.object().status.containerStatuses[0].ready
+                        }
                       }
                     }
                   }
