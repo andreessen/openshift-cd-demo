@@ -111,7 +111,7 @@ objects:
                       timeout(time: 1, unit: 'HOURS') { // Just in case something goes wrong, pipeline will be killed after a timeout
                       script {
                           withSonarQubeEnv('Sonar') {
-                              sleep 10
+                              sleep 20
                               println("QG: start")
                               def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
                               println("QG: ${qg.status}")

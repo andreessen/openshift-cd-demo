@@ -2,7 +2,12 @@
 
 # CI/CD Demo - OpenShift Container Platform 3.10
 
-This repository includes the infrastructure and pipeline definition for continuous delivery using Jenkins, Nexus, SonarQube and Eclipse Che on OpenShift. 
+This repository includes the infrastructure and pipeline definition for continuous delivery using Jenkins, Nexus, SonarQube and Eclipse Che on OpenShift. Do not forget to add Wildfly IS:
+
+  ```
+  oc project openshift
+  oc create -f https://raw.githubusercontent.com/openshift-s2i/s2i-wildfly/master/imagestreams/wildfly-centos7.json
+  ```    
 
 * [Introduction](#introduction)
 * [Prerequisites](#prerequisites)
