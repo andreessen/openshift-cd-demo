@@ -460,16 +460,8 @@ objects:
 
             sleep 10
 
-            cat <<EOF > /tmp/data.json
-            {
-              "clone_addr": "https://github.com/OpenShiftDemos/openshift-tasks.git",
-              "uid": 1,
-              "repo_name": "openshift-tasks"
-            }
-            EOF
-
             _RETURN=$(curl -o /tmp/curl.log -sL -w "%{http_code}" -H "Content-Type: application/json" \
-            -u $GOGS_USER:$GOGS_PWD -X POST http://$GOGS_SVC:3000/api/v1/repos/migrate -d @/tmp/data.json)
+            -u $GOGS_USER:$GOGS_PWD -X POST http://$GOGS_SVC:3000/api/v1/repos/migrate --data '{"clone_addr": "https://github.com/OpenShiftDemos/openshift-tasks.git","repo_name": "openshift-tasks","uid": 1}')
 
             if [ $_RETURN != "201" ] ;then
               echo "ERROR: Failed to imported openshift-tasks GitHub repo"
