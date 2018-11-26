@@ -217,5 +217,5 @@ Install plugin in Jenkins:
 ![](images/jenkins-sq-scanner.png?raw=true)
 Configure plugin in Jenkins:
 ![](images/jenkins-sq-config.png?raw=true)
-Add webhook in SonarQube:
+Add webhook in SonarQube (http://jenkins/sonarqube-webhook):
 ![](images/sq-jenkins-webhook.png?raw=true)
