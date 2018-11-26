@@ -47,6 +47,7 @@ The application used in this pipeline is a JAX-RS application which is available
 If you have access to RHPDS, provisioning of this demo is automated via the service catalog under **OpenShift Demos &rarr; OpenShift CI/CD for Monolith**. If you don't know what RHPDS is, read the instructions in the next section.
 
 ## Automated Deploy on OpenShift
+!!!TODO - FixMe
 You can se the `scripts/provision.sh` script provided to deploy the entire demo:
 
   ```
@@ -60,13 +61,18 @@ Follow these [instructions](docs/local-cluster.md) in order to create a local Op
 
   ```shell
   # Create Projects
-  oc new-project dev --display-name="Tasks - Dev"
-  oc new-project stage --display-name="Tasks - Stage"
   oc new-project cicd --display-name="CI/CD"
 
   # Grant Jenkins Access to Projects
   oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n dev
   oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n stage
+
+  # Grant Jenkins required permissions
+  # Role to create projects
+  oc adm policy add-cluster-role-to-user self-provisioner system:serviceaccount:cicd:jenkins
+  # Role to create quotas inside projects
+  oc create clusterrole quota-editor --verb=create,get,list,update,watch --resource=resourcequotas
+  oc adm policy add-cluster-role-to-user quota-editor system:serviceaccount:cicd:jenkins
   ```  
 
 And then deploy the demo:

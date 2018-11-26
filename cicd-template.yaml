@@ -80,6 +80,41 @@ objects:
               label 'maven'
             }
             stages {
+                
+              stage("Initialize") {
+                  steps {
+                      sh "oc whoami"
+                      script {
+                        try {
+                          sh "oc new-project ${env.DEV_PROJECT} --display-name='Tasks - ${env.DEV_PROJECT}'"
+                          
+                          sh "oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n ${env.DEV_PROJECT}"
+                          
+                          sh "oc create quota -n ${env.DEV_PROJECT} compute --scopes=NotTerminating --hard=cpu=1,memory=2G"
+                          sh "oc create quota -n ${env.DEV_PROJECT} logical --hard=pods=5,services=2,secrets=20,persistentvolumeclaims=2"
+                          sh "oc project ${env.DEV_PROJECT}"
+                          sh "oc adm policy add-role-to-user admin gpn"
+                        } catch(Exception e) {
+                          println("Dev project already exists")
+                        }
+
+                      }
+                      script {
+                        try {
+                          sh "oc new-project ${env.STAGE_PROJECT} --display-name='Tasks - ${env.STAGE_PROJECT}'"
+                          sh "oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n ${env.STAGE_PROJECT}"
+                      
+                          sh "oc create quota -n ${env.STAGE_PROJECT} compute --scopes=NotTerminating --hard=cpu=1,memory=2G"
+                          sh "oc create quota -n ${env.STAGE_PROJECT} logical --hard=pods=5,services=2,secrets=20,persistentvolumeclaims=2"
+                          sh "oc project ${env.STAGE_PROJECT}"
+                          sh "oc adm policy add-role-to-user admin gpn"
+                        } catch(Exception e) {
+                          println("Stage project already exists")
+                        }
+                      }
+                  }
+                }
+                
               stage('Build App') {
                 steps {
                   git branch: 'eap-7', url: 'http://gogs:3000/gogs/openshift-tasks.git'
@@ -149,6 +184,7 @@ objects:
                   }
                 }
               }
+
               stage('Build Image') {
                 steps {
                   sh "rm -rf oc-build && mkdir -p oc-build/deployments"
@@ -157,12 +193,18 @@ objects:
                   script {
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
-                        openshift.selector("bc", "tasks").startBuild("--from-dir=oc-build", "--wait=true")
+                          try {
+                              openshift.patch('bc/tasks', "'{\"spec\":{\"resources\":{\"limits\":{\"cpu\" : \"100m\", \"memory\" : \"256Mi\"}}}}'")
+                          } catch(Exception e) {
+                              println("Dev project bc already patched")
+                          }
+                          openshift.selector("bc", "tasks").startBuild("--from-dir=oc-build", "--wait=true")
                       }
                     }
                   }
                 }
               }
+
               stage('Create DEV') {
                 when {
                   expression {
@@ -180,25 +222,27 @@ objects:
                         def app = openshift.newApp("tasks:latest")
                         app.narrow("svc").expose();
 
-                        openshift.set("probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                        openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-
+                        openshift.set("probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=80 --failure-threshold=20 --period-seconds=10 --timeout-seconds=5")
+                        openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                        openshift.set("resources dc/tasks --requests=cpu=900m,memory=900Mi --limits=cpu=900m,memory=900Mi -n ${env.DEV_PROJECT}")
                         def dc = openshift.selector("dc", "tasks")
                         while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
                             sleep 10
                         }
                         openshift.set("triggers", "dc/tasks", "--manual")
+                        openshift.set("env", "dc/tasks", "MYVAR=foo")
                       }
                     }
                   }
                 }
               }
+
               stage('Deploy DEV') {
                 steps {
                   script {
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
-                        openshift.selector("dc", "tasks").rollout().latest();
+                        //openshift.selector("dc", "tasks").rollout().latest();
                         def dc = openshift.selector("dc", "tasks");
                         def dcObj = dc.object();
                         def podSelector = openshift.selector('pod', [deployment: "tasks-${dcObj.status.latestVersion}"])
@@ -238,16 +282,18 @@ objects:
                               println("Begin")
                               openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-green:${version}")
                               openshift.newApp("--name=tasks-green --image-stream=${env.STAGE_PROJECT}/tasks-green:${version}").narrow("svc").expose()
-                              openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                              openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                              openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                              openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                              openshift.set("resources dc/tasks-green --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}")
                           } else {
                               
                               if (!openshift.selector('dc', 'tasks-blue').exists()) {
                                   println("New Blue")
                                   openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}/tasks-blue:${version}")
                                   openshift.newApp("--name=tasks-blue --image-stream=${env.STAGE_PROJECT}/tasks-blue:${version}")
-                                  openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                  openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
+                                  openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                                  openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                                  openshift.set("resources dc/tasks-blue --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}")
                                   println("6")
                                   def dc = openshift.selector("dc", "tasks-blue")
                                   while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
@@ -287,9 +333,9 @@ objects:
                                       openshift.selector('svc', 'tasks-green').delete()
                                       println("4-1-1")
                                       openshift.newApp("--name=tasks-green --image-stream=${env.STAGE_PROJECT}/tasks-green:${version}")
-                                      openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                      openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                                      
+                                      openshift.set("probe dc/tasks-green --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                                      openshift.set("probe dc/tasks-green --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                                      openshift.set("resources dc/tasks-green --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}")
                                       def dc = openshift.selector("dc", "tasks-green")
                                       while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
                                           sleep 10
@@ -303,9 +349,9 @@ objects:
                                       openshift.selector('svc', 'tasks-blue').delete()
                                       println("4-2-1")
                                       openshift.newApp("--name=tasks-blue --image-stream=${env.STAGE_PROJECT}/tasks-blue:${version}")
-                                      openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                                      openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-                                  
+                                      openshift.set("probe dc/tasks-blue --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                                      openshift.set("probe dc/tasks-blue --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                                      openshift.set("resources dc/tasks-blue --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}")
                                       def dc = openshift.selector("dc", "tasks-blue")
                                       while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
                                           sleep 10
@@ -389,7 +435,7 @@ objects:
   metadata:
     name: cicd-demo-installer
   spec:
-    activeDeadlineSeconds: 400
+    activeDeadlineSeconds: 600
     completions: 1
     parallelism: 1
     template:
