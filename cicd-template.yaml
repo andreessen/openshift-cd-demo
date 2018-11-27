@@ -112,6 +112,19 @@ objects:
                           println("Stage project already exists")
                         }
                       }
+                      script {
+                        try {
+                          sh "oc new-project ${env.STAGE_PROJECT}-ab --display-name='Tasks - ${env.STAGE_PROJECT}-ab'"
+                          sh "oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n ${env.STAGE_PROJECT}-ab"
+                      
+                          sh "oc create quota -n ${env.STAGE_PROJECT}-ab compute --scopes=NotTerminating --hard=cpu=2,memory=3G"
+                          sh "oc create quota -n ${env.STAGE_PROJECT}-ab logical --hard=pods=10,services=4,secrets=30,persistentvolumeclaims=2"
+                          sh "oc project ${env.STAGE_PROJECT}-ab"
+                          sh "oc adm policy add-role-to-user admin gpn"
+                        } catch(Exception e) {
+                          println("Stage-ab project already exists")
+                        }
+                      }
                   }
                 }
                 
@@ -148,11 +161,11 @@ objects:
                           withSonarQubeEnv('Sonar') {
                               sleep 20
                               println("QG: start")
-                              def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
-                              println("QG: ${qg.status}")
-                              if (qg.status != 'OK') {
-                                error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                              }
+                              //def qg = waitForQualityGate() // Reuse taskId previously collected by withSonarQubeEnv
+                              //println("QG: ${qg.status}")
+                              //if (qg.status != 'OK') {
+                                //error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                              //}
                           }    
                           
                       }
@@ -381,6 +394,67 @@ objects:
                   }
                 }
               }
+              
+              stage('Deploy STAGE-ab') {
+                steps {
+                  script {
+                    
+                    
+                    openshift.withCluster() {
+                      openshift.withProject("${env.STAGE_PROJECT}-ab") {
+                          echo "Using project: ${openshift.project()}"
+                          if (!openshift.selector('dc', 'tasks-old').exists()) {
+                              println("Begin")
+                              openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}-ab/tasks-old:${version}")
+                              openshift.newApp("--name=tasks-old --image-stream=${env.STAGE_PROJECT}-ab/tasks-old:${version}").narrow("svc").expose()
+                              openshift.set("probe dc/tasks-old --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                              openshift.set("probe dc/tasks-old --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                              openshift.set("resources dc/tasks-old --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}-ab")
+                              println("Old app done")
+                              openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}-ab/tasks-new:${version}")
+                              openshift.newApp("--name=tasks-new --image-stream=${env.STAGE_PROJECT}-ab/tasks-new:${version}").narrow("svc").expose()
+                              openshift.set("probe dc/tasks-new --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=90 --failure-threshold=20 --period-seconds=20 --timeout-seconds=5")
+                              openshift.set("probe dc/tasks-new --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
+                              openshift.set("resources dc/tasks-new --requests=cpu=330m,memory=600Mi --limits=cpu=330m,memory=600Mi -n ${env.STAGE_PROJECT}-ab")
+                              println("New app done")
+                              def dc = openshift.selector("dc", "tasks-new")
+                              while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                                  sleep 10
+                              }
+
+                              sh "oc project ${env.STAGE_PROJECT}-ab"
+                              sh "oc expose service tasks-old --name='ab' -l name='ab'"
+                              sh "oc annotate route/ab haproxy.router.openshift.io/balance=roundrobin"
+                              sh "oc set route-backends ab tasks-old=20 tasks-new=80"
+                              println("All done")
+
+                          } else {
+                              
+                              println("Both")
+
+                              openshift.tag("${env.STAGE_PROJECT}-ab/tasks-new:${version}", "${env.STAGE_PROJECT}-ab/tasks-old:${version}")
+                              //openshift.selector("dc", "tasks-old").rollout().latest()
+
+                              openshift.tag("${env.DEV_PROJECT}/tasks:latest", "${env.STAGE_PROJECT}-ab/tasks-new:${version}")
+                              //openshift.selector("dc", "tasks-new").rollout().latest()
+
+                              def dc = openshift.selector("dc", "tasks-new")
+                              while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
+                                  sleep 10
+                              } 
+                          }    
+                      }
+                    }    
+                    
+                    
+                    
+                    
+                    
+                  }
+                }
+              }
+              
+              
             }
           }
       type: JenkinsPipeline
