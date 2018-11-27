@@ -90,7 +90,7 @@ objects:
                           
                           sh "oc policy add-role-to-user edit system:serviceaccount:cicd:jenkins -n ${env.DEV_PROJECT}"
                           
-                          sh "oc create quota -n ${env.DEV_PROJECT} compute --scopes=NotTerminating --hard=cpu=1,memory=2G"
+                          sh "oc create quota -n ${env.DEV_PROJECT} compute --scopes=NotTerminating --hard=cpu=2,memory=2G"
                           sh "oc create quota -n ${env.DEV_PROJECT} logical --hard=pods=5,services=2,secrets=20,persistentvolumeclaims=2"
                           sh "oc project ${env.DEV_PROJECT}"
                           sh "oc adm policy add-role-to-user admin gpn"
@@ -99,6 +99,7 @@ objects:
                         }
 
                       }
+                      
                       script {
                         try {
                           sh "oc new-project ${env.STAGE_PROJECT} --display-name='Tasks - ${env.STAGE_PROJECT}'"
@@ -237,7 +238,9 @@ objects:
 
                         openshift.set("probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=80 --failure-threshold=20 --period-seconds=10 --timeout-seconds=5")
                         openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
-                        openshift.set("resources dc/tasks --requests=cpu=900m,memory=900Mi --limits=cpu=900m,memory=900Mi -n ${env.DEV_PROJECT}")
+                        openshift.set("resources dc/tasks --requests=cpu=500m,memory=600Mi --limits=cpu=900m,memory=900Mi -n ${env.DEV_PROJECT}")
+                        echo "Using project: ${openshift.project()}"
+                        sh "oc autoscale dc/tasks --min 1 --max 2 --cpu-percent=30 -n ${env.DEV_PROJECT}"
                         def dc = openshift.selector("dc", "tasks")
                         while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
                             sleep 10
@@ -268,6 +271,8 @@ objects:
                   }
                 }
               }
+              
+              
               stage('Run integration tests') {
                   steps {
                       println("Here we run integration tests")
