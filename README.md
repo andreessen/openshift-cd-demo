@@ -219,3 +219,5 @@ Configure plugin in Jenkins:
 ![](images/jenkins-sq-config.png?raw=true)
 Add webhook in SonarQube (http://jenkins/sonarqube-webhook):
 ![](images/sq-jenkins-webhook.png?raw=true)
+* A/B deployment [https://docs.openshift.com/container-platform/3.10/dev_guide/deployments/advanced_deployment_strategies.html#advanced-deployment-a-b-deployment](https://docs.openshift.com/container-platform/3.10/dev_guide/deployments/advanced_deployment_strategies.html#advanced-deployment-a-b-deployment):
+![](images/ab-routing.png?raw=true)
