@@ -240,13 +240,14 @@ objects:
                         openshift.set("probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 --timeout-seconds=5")
                         openshift.set("resources dc/tasks --requests=cpu=500m,memory=600Mi --limits=cpu=900m,memory=900Mi -n ${env.DEV_PROJECT}")
                         echo "Using project: ${openshift.project()}"
-                        sh "oc autoscale dc/tasks --min 1 --max 2 --cpu-percent=30 -n ${env.DEV_PROJECT}"
                         def dc = openshift.selector("dc", "tasks")
                         while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
                             sleep 10
                         }
                         openshift.set("triggers", "dc/tasks", "--manual")
                         openshift.set("env", "dc/tasks", "MYVAR=foo")
+                        sleep 45
+                        sh "oc autoscale dc/tasks --min 1 --max 2 --cpu-percent=30 -n ${env.DEV_PROJECT}"
                       }
                     }
                   }
@@ -258,7 +259,7 @@ objects:
                   script {
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
-                        //openshift.selector("dc", "tasks").rollout().latest();
+                        openshift.selector("dc", "tasks").rollout().latest();
                         def dc = openshift.selector("dc", "tasks");
                         def dcObj = dc.object();
                         def podSelector = openshift.selector('pod', [deployment: "tasks-${dcObj.status.latestVersion}"])
@@ -266,6 +267,7 @@ objects:
                             echo "pod: ${it.name()}"
                             return it.object().status.containerStatuses[0].ready
                         }
+                        sleep 45
                       }
                     }
                   }
@@ -275,7 +277,57 @@ objects:
               
               stage('Run integration tests') {
                   steps {
-                      println("Here we run integration tests")
+                      script {
+                          openshift.withCluster() {
+                              openshift.withProject(env.DEV_PROJECT) {
+                                  echo "Now using project: ${openshift.project()}"
+                                  sh "oc get route tasks -o=go-template='{{ .spec.host }}' -n ${env.DEV_PROJECT} > devHost"
+                                  println("Here we run integration tests")
+                                  def devHost = readFile('devHost').trim()
+                                  println("dev host = ${devHost}")
+                                  sh "curl -X GET http://${devHost}/ws/demo/load/120"
+                                  sleep 30
+                                  //count pods
+                                  def dc = openshift.selector("dc", "tasks")
+                                  def count = 1
+                                  while (count < 40) {
+                                      if (count > 30) {
+                                          error "Pipeline aborted due to Integration tests fail"
+                                      }
+                                      if (dc.object().spec.replicas < 2) {
+                                          echo "Sleep....."
+                                          sleep 10
+                                          count++;
+                                      } else {
+                                          break;
+                                      }
+                                  }
+                                  def dcObj = dc.object();
+                                  echo "dcObj: ${dcObj}"
+                                  def podSelector = openshift.selector('pod', [deployment: "tasks-${dcObj.status.latestVersion}"])
+                                  echo "After podSelector: ${podSelector}"
+
+                                  count = 1
+                                  while (count < 40) {
+                                      if (count > 30) {
+                                          error "Pipeline aborted due to Integration tests fail"
+                                      }
+                                      sh "oc get dc tasks '-o=go-template={{ .status.readyReplicas }}' -n ${env.DEV_PROJECT} > devReplicas"
+                                      def devReplicas = readFile('devReplicas').trim()
+                                      println("devReplicas  = ${devReplicas}")
+                                      if (devReplicas != "2") {
+                                          echo "Sleep....."
+                                          sleep 10
+                                          count++;
+                                      } else {
+                                          break;
+                                      }
+                                  }
+                                  
+                                  println("Integration tests completed succesfully")
+                              }
+                          }
+                      }
                   }
               }
               stage('Promote to STAGE?') {
